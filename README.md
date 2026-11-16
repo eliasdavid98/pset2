@@ -1,52 +1,52 @@
-# PSet 2: Kestra ingestion and dbt modeling
+# PSet 2: ingesta con Kestra y modelado con dbt
 
-This first pipeline loads the local churn competition CSV snapshot into Snowflake:
+Este pipeline carga en Snowflake los archivos CSV locales de la competencia de churn:
 
-`data/*.csv` → Kestra → Snowflake internal stage → `RAW.TRAIN`, `RAW.TEST`, `RAW.SAMPLE_SUBMISSION` → dbt Bronze → Silver → Gold
+`data/*.csv` → Kestra → stage interno de Snowflake → `RAW.TRAIN`, `RAW.TEST`, `RAW.SAMPLE_SUBMISSION` → dbt Bronze → Silver → Gold
 
-The raw columns are strings so the Bronze/Silver dbt models can parse and validate values without losing the source representation.
+Las columnas de Raw se almacenan como texto para que los modelos Bronze y Silver de dbt puedan convertirlas y validarlas sin perder la representación original de la fuente.
 
-## Configure and start Kestra
+## Configurar e iniciar Kestra
 
-1. Copy `.env.example` to `.env`.
-2. Set `POSTGRES_PASSWORD` and the Snowflake URL, username, database, warehouse, and schema in `.env`. The configured Snowflake database must already exist.
-3. Start the local services:
+1. Copia `.env.example` como `.env`.
+2. Configura `POSTGRES_PASSWORD` y la URL, el usuario, la base de datos, el warehouse y el esquema de Snowflake en `.env`. La base de datos indicada debe existir.
+3. Inicia los servicios locales:
 
    ```bash
    docker compose up -d
    ```
 
-4. Open [http://localhost:8080](http://localhost:8080). In Kestra, add the `SNOWFLAKE_PASSWORD` secret for the `pset2` namespace.
-5. Import `kestra/flows/ingest_churn.yml` in the Kestra UI, then execute `ingest_churn_csv`.
+4. Abre [http://localhost:8080](http://localhost:8080). En Kestra, agrega el secreto `SNOWFLAKE_PASSWORD` al namespace `pset2`.
+5. Importa `kestra/flows/ingest_churn.yml` en la interfaz de Kestra y ejecuta `ingest_churn_csv`.
 
-The Kestra container mounts the local `data/` directory read-only at `/app/data`. The flow checks that all three CSVs exist and that their headers match the expected source schema before uploading.
+El contenedor de Kestra monta el directorio local `data/` en modo de solo lectura en `/app/data`. Antes de cargar, el flujo comprueba que existan los tres CSV y que sus encabezados coincidan con el esquema esperado.
 
-## Run and rerun
+## Ejecutar y volver a ejecutar la ingesta
 
-The current source is a local snapshot, so the flow has no time-based schedule: each run is started manually after the files are made available or refreshed. Snowflake's default `COPY INTO` load history prevents reloading the same staged files on a retry. To backfill a new snapshot, replace the local files and execute the flow again; review the Snowflake copy history first if the staged files have been replaced under the same names.
+La fuente actual es una copia local, por lo que el flujo no tiene una ejecución programada: se inicia manualmente cada vez que los archivos estén disponibles o se actualicen. El historial de carga predeterminado de `COPY INTO` de Snowflake evita volver a cargar los mismos archivos del stage durante un reintento. Para cargar una nueva copia histórica, reemplaza los archivos locales y ejecuta el flujo de nuevo; si reutilizaste los mismos nombres para archivos distintos, revisa primero el historial de carga de Snowflake.
 
-The Snowflake tasks retry transient errors up to three times. They fail the execution on CSV validation or load errors rather than silently accepting rejected rows.
+Las tareas de Snowflake reintentan errores transitorios hasta tres veces. Si falla la validación de los CSV o la carga, la ejecución falla explícitamente en lugar de aceptar filas rechazadas de manera silenciosa.
 
-## dbt: data quality and star schema
+## dbt: calidad de datos y esquema estrella
 
-Step 3 cleans and audits the raw train/test tables with Bronze and Silver models. Step 4 builds Gold dimensions and `GOLD.FACT_CUSTOMER_CHURN`, whose grain is one row per source `id`. The measured quality evidence, cleaning decisions, star-schema diagram, and execution instructions are in [`docs/data_quality_and_dimensional_model.md`](docs/data_quality_and_dimensional_model.md).
+El paso 3 limpia y audita las tablas Raw de train y test mediante modelos Bronze y Silver. El paso 4 crea las dimensiones Gold y `GOLD.FACT_CUSTOMER_CHURN`, cuyo grano es una fila por `id` de origen. La evidencia de calidad, las decisiones de limpieza, el diagrama del esquema estrella y las instrucciones de ejecución están en [`docs/data_quality_and_dimensional_model.md`](docs/data_quality_and_dimensional_model.md).
 
-After running the Kestra ingestion:
+Después de ejecutar la ingesta con Kestra:
 
-1. Copy `.env.example` to `.env` and set `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USERNAME`, `SNOWFLAKE_PASSWORD`, `SNOWFLAKE_DATABASE`, and `SNOWFLAKE_WAREHOUSE` as well as `SNOWFLAKE_URL`.
-2. Install dbt using `dbt/requirements.txt` in Python 3.12, then export `.env` variables into the shell as shown in the modeling document.
-3. Run `dbt debug --project-dir dbt --profiles-dir dbt`, followed by `dbt build --project-dir dbt --profiles-dir dbt`.
+1. Copia `.env.example` como `.env` y configura `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USERNAME`, `SNOWFLAKE_PASSWORD`, `SNOWFLAKE_DATABASE`, `SNOWFLAKE_WAREHOUSE` y `SNOWFLAKE_URL`.
+2. Instala dbt desde `dbt/requirements.txt` usando Python 3.12 y exporta las variables de `.env` a la terminal, como se indica en el documento de modelado.
+3. Ejecuta `dbt debug --project-dir dbt --profiles-dir dbt` y luego `dbt build --project-dir dbt --profiles-dir dbt`.
 
-The dbt profile reads credentials only from environment variables. Do not commit `.env` or paste credentials into the profile or flow files.
+El perfil de dbt lee las credenciales únicamente desde variables de entorno. No subas `.env` ni pegues credenciales en el perfil o en los archivos del flujo.
 
-## Spark: One Big Table
+## Spark: One Big Table (OBT)
 
-After `dbt build` succeeds, the Gold tables are ready. Set `SNOWFLAKE_GOLD_SCHEMA=GOLD` and `SNOWFLAKE_OBT_TABLE=OBT_CUSTOMER_CHURN` in `.env`, then run:
+Cuando `dbt build` termine correctamente, las tablas Gold estarán listas. Configura `SNOWFLAKE_GOLD_SCHEMA=GOLD` y `SNOWFLAKE_OBT_TABLE=OBT_CUSTOMER_CHURN` en `.env` y ejecuta:
 
 ```bash
 docker compose --profile spark run --rm spark
 ```
 
-The Spark service reads the Gold fact and four dimensions, validates unique keys, left-joins descriptive dimension attributes, and checks that the OBT has the same row count, unique observation IDs, and train/test counts as the fact. It fails instead of writing if a dimension is unmatched or a join changes the fact grain. On success it replaces `GOLD.OBT_CUSTOMER_CHURN` with the validated snapshot. The Snowflake role must be able to read Gold and create/replace a table in that schema.
+El servicio de Spark lee la tabla de hechos Gold y sus cuatro dimensiones, valida que las claves sean únicas y realiza joins left para incorporar los atributos descriptivos de las dimensiones. También comprueba que la OBT conserve el total de filas, los `observation_id` únicos y los conteos de train y test de la tabla de hechos. Si una dimensión no tiene correspondencia o un join cambia el grano, el job falla antes de escribir. Si las validaciones pasan, reemplaza `GOLD.OBT_CUSTOMER_CHURN` con la copia validada. El rol de Snowflake debe tener permisos para leer Gold y crear o reemplazar una tabla en ese esquema.
 
-The star schema remains the analytics source for flexible joins and dimensional reporting; the OBT is a denormalized snapshot for downstream feature engineering and model training, where a single row per observation is more convenient. The OBT retains `source_split` and leaves `exited` NULL for test observations to prevent target leakage.
+El esquema estrella sigue siendo útil para análisis y reportes con joins flexibles y dimensiones reutilizables. La OBT, en cambio, es una copia desnormalizada para preparar features o entrenar modelos, donde conviene disponer de una sola fila por observación. La OBT conserva `source_split` y deja `exited` en NULL para las observaciones de test, evitando filtrar la etiqueta objetivo.
