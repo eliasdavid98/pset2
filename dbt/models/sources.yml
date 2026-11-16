@@ -1,0 +1,22 @@
+version: 2
+
+sources:
+  - name: raw
+    description: Unmodified CSV files ingested by Kestra into Snowflake.
+    database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
+    schema: "{{ env_var('SNOWFLAKE_SCHEMA', 'RAW') }}"
+    tables:
+      - name: train
+        description: Labeled source observations; one row per competition record id.
+        columns:
+          - name: id
+            tests:
+              - not_null
+              - unique
+      - name: test
+        description: Unlabeled source observations; one row per competition record id.
+        columns:
+          - name: id
+            tests:
+              - not_null
+              - unique

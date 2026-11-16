@@ -1,0 +1,124 @@
+version: 2
+
+models:
+  - name: bronze_train
+    description: Typed representation of RAW.TRAIN; original raw strings remain available in RAW.
+    columns:
+      - name: id
+        tests: [not_null, unique]
+  - name: bronze_test
+    description: Typed representation of RAW.TEST; label is explicitly NULL because test has no target.
+    columns:
+      - name: id
+        tests: [not_null, unique]
+  - name: silver_train
+    description: Cleaned labeled observations; malformed non-integral customer identifiers are nulled and flagged, not dropped.
+    columns:
+      - name: id
+        tests: [not_null, unique]
+      - name: customer_id_is_valid
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+                quote: false
+      - name: geography
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["France", "Germany", "Spain"]
+      - name: gender
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["Female", "Male"]
+      - name: exited
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+  - name: silver_test
+    description: Cleaned unlabeled observations; no target values are synthesized.
+    columns:
+      - name: id
+        tests: [not_null, unique]
+      - name: customer_id_is_valid
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [true, false]
+                quote: false
+  - name: silver_all_observations
+    description: Train and test observations combined without discarding source split or test labels.
+    columns:
+      - name: id
+        tests: [not_null, unique]
+  - name: silver_quality_report
+    description: Counts and rates for completeness, identifier validity, and a salary distribution-review flag.
+    columns:
+      - name: source_split
+        tests: [not_null]
+      - name: check_name
+        tests: [not_null]
+      - name: affected_rows
+        tests: [not_null]
+  - name: dim_geography
+    columns:
+      - name: geography_key
+        tests: [not_null, unique]
+  - name: dim_gender
+    columns:
+      - name: gender_key
+        tests: [not_null, unique]
+  - name: dim_age_band
+    columns:
+      - name: age_band_key
+        tests: [not_null, unique]
+  - name: dim_product_count
+    columns:
+      - name: product_count_key
+        tests: [not_null, unique]
+  - name: fact_customer_churn
+    description: One row per competition observation id; the Exited label is NULL for the test split.
+    columns:
+      - name: observation_id
+        tests: [not_null, unique]
+      - name: source_split
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["train", "test"]
+      - name: geography_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_geography')
+                field: geography_key
+      - name: gender_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_gender')
+                field: gender_key
+      - name: age_band_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_age_band')
+                field: age_band_key
+      - name: product_count_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_product_count')
+                field: product_count_key

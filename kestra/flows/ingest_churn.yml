@@ -1,0 +1,186 @@
+id: ingest_churn_csv
+namespace: pset2
+description: Load the local churn competition CSV files into the Snowflake RAW schema.
+
+pluginDefaults:
+  - type: io.kestra.plugin.jdbc.snowflake
+    values:
+      url: "{{ envs.SNOWFLAKE_URL }}"
+      username: "{{ envs.SNOWFLAKE_USERNAME }}"
+      password: "{{ secret('SNOWFLAKE_PASSWORD') }}"
+      database: "{{ envs.SNOWFLAKE_DATABASE }}"
+      warehouse: "{{ envs.SNOWFLAKE_WAREHOUSE }}"
+
+tasks:
+  - id: collect_local_files
+    type: io.kestra.plugin.scripts.shell.Commands
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    commands:
+      - test -s /app/data/train.csv
+      - test -s /app/data/test.csv
+      - test -s /app/data/sample_submission.csv
+      - grep -Fqx 'id,CustomerId,Surname,CreditScore,Geography,Gender,Age,Tenure,Balance,NumOfProducts,HasCrCard,IsActiveMember,EstimatedSalary,Exited' /app/data/train.csv
+      - grep -Fqx 'id,CustomerId,Surname,CreditScore,Geography,Gender,Age,Tenure,Balance,NumOfProducts,HasCrCard,IsActiveMember,EstimatedSalary' /app/data/test.csv
+      - grep -Fqx 'id,Exited' /app/data/sample_submission.csv
+      - cp /app/data/train.csv {{ workingDir }}/train.csv
+      - cp /app/data/test.csv {{ workingDir }}/test.csv
+      - cp /app/data/sample_submission.csv {{ workingDir }}/sample_submission.csv
+    outputFiles:
+      - train.csv
+      - test.csv
+      - sample_submission.csv
+
+  - id: create_raw_schema
+    type: io.kestra.plugin.jdbc.snowflake.Query
+    sql: "CREATE SCHEMA IF NOT EXISTS {{ envs.SNOWFLAKE_SCHEMA }}"
+    retry:
+      type: exponential
+      interval: PT30S
+      maxDuration: PT5M
+      maxAttempt: 3
+
+  - id: prepare_raw_tables
+    type: io.kestra.plugin.jdbc.snowflake.Queries
+    schema: "{{ envs.SNOWFLAKE_SCHEMA }}"
+    sql: |
+      CREATE STAGE IF NOT EXISTS PSET2_STAGE;
+
+      CREATE TABLE IF NOT EXISTS TRAIN (
+        ID VARCHAR,
+        CUSTOMERID VARCHAR,
+        SURNAME VARCHAR,
+        CREDITSCORE VARCHAR,
+        GEOGRAPHY VARCHAR,
+        GENDER VARCHAR,
+        AGE VARCHAR,
+        TENURE VARCHAR,
+        BALANCE VARCHAR,
+        NUMOFPRODUCTS VARCHAR,
+        HASCRCARD VARCHAR,
+        ISACTIVEMEMBER VARCHAR,
+        ESTIMATEDSALARY VARCHAR,
+        EXITED VARCHAR
+      );
+
+      CREATE TABLE IF NOT EXISTS TEST (
+        ID VARCHAR,
+        CUSTOMERID VARCHAR,
+        SURNAME VARCHAR,
+        CREDITSCORE VARCHAR,
+        GEOGRAPHY VARCHAR,
+        GENDER VARCHAR,
+        AGE VARCHAR,
+        TENURE VARCHAR,
+        BALANCE VARCHAR,
+        NUMOFPRODUCTS VARCHAR,
+        HASCRCARD VARCHAR,
+        ISACTIVEMEMBER VARCHAR,
+        ESTIMATEDSALARY VARCHAR
+      );
+
+      CREATE TABLE IF NOT EXISTS SAMPLE_SUBMISSION (
+        ID VARCHAR,
+        EXITED VARCHAR
+      );
+    retry:
+      type: exponential
+      interval: PT30S
+      maxDuration: PT5M
+      maxAttempt: 3
+
+  - id: upload_train
+    type: io.kestra.plugin.jdbc.snowflake.Upload
+    schema: "{{ envs.SNOWFLAKE_SCHEMA }}"
+    from: "{{ outputs.collect_local_files.outputFiles['train.csv'] }}"
+    fileName: train.csv
+    prefix: train
+    stageName: "@{{ envs.SNOWFLAKE_DATABASE }}.{{ envs.SNOWFLAKE_SCHEMA }}.PSET2_STAGE"
+    retry:
+      type: exponential
+      interval: PT30S
+      maxDuration: PT5M
+      maxAttempt: 3
+
+  - id: upload_test
+    type: io.kestra.plugin.jdbc.snowflake.Upload
+    schema: "{{ envs.SNOWFLAKE_SCHEMA }}"
+    from: "{{ outputs.collect_local_files.outputFiles['test.csv'] }}"
+    fileName: test.csv
+    prefix: test
+    stageName: "@{{ envs.SNOWFLAKE_DATABASE }}.{{ envs.SNOWFLAKE_SCHEMA }}.PSET2_STAGE"
+    retry:
+      type: exponential
+      interval: PT30S
+      maxDuration: PT5M
+      maxAttempt: 3
+
+  - id: upload_sample_submission
+    type: io.kestra.plugin.jdbc.snowflake.Upload
+    schema: "{{ envs.SNOWFLAKE_SCHEMA }}"
+    from: "{{ outputs.collect_local_files.outputFiles['sample_submission.csv'] }}"
+    fileName: sample_submission.csv
+    prefix: sample_submission
+    stageName: "@{{ envs.SNOWFLAKE_DATABASE }}.{{ envs.SNOWFLAKE_SCHEMA }}.PSET2_STAGE"
+    retry:
+      type: exponential
+      interval: PT30S
+      maxDuration: PT5M
+      maxAttempt: 3
+
+  - id: load_train
+    type: io.kestra.plugin.jdbc.snowflake.Query
+    schema: "{{ envs.SNOWFLAKE_SCHEMA }}"
+    sql: |
+      COPY INTO TRAIN
+      FROM @PSET2_STAGE/train/train.csv.gz
+      FILE_FORMAT = (
+        TYPE = CSV
+        SKIP_HEADER = 1
+        FIELD_OPTIONALLY_ENCLOSED_BY = '"'
+        EMPTY_FIELD_AS_NULL = TRUE
+      )
+      ON_ERROR = 'ABORT_STATEMENT'
+    retry:
+      type: exponential
+      interval: PT30S
+      maxDuration: PT5M
+      maxAttempt: 3
+
+  - id: load_test
+    type: io.kestra.plugin.jdbc.snowflake.Query
+    schema: "{{ envs.SNOWFLAKE_SCHEMA }}"
+    sql: |
+      COPY INTO TEST
+      FROM @PSET2_STAGE/test/test.csv.gz
+      FILE_FORMAT = (
+        TYPE = CSV
+        SKIP_HEADER = 1
+        FIELD_OPTIONALLY_ENCLOSED_BY = '"'
+        EMPTY_FIELD_AS_NULL = TRUE
+      )
+      ON_ERROR = 'ABORT_STATEMENT'
+    retry:
+      type: exponential
+      interval: PT30S
+      maxDuration: PT5M
+      maxAttempt: 3
+
+  - id: load_sample_submission
+    type: io.kestra.plugin.jdbc.snowflake.Query
+    schema: "{{ envs.SNOWFLAKE_SCHEMA }}"
+    sql: |
+      COPY INTO SAMPLE_SUBMISSION
+      FROM @PSET2_STAGE/sample_submission/sample_submission.csv.gz
+      FILE_FORMAT = (
+        TYPE = CSV
+        SKIP_HEADER = 1
+        FIELD_OPTIONALLY_ENCLOSED_BY = '"'
+        EMPTY_FIELD_AS_NULL = TRUE
+      )
+      ON_ERROR = 'ABORT_STATEMENT'
+    retry:
+      type: exponential
+      interval: PT30S
+      maxDuration: PT5M
+      maxAttempt: 3

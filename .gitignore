@@ -1,0 +1,12 @@
+.env
+.venv*/
+.DS_Store
+/__pycache__/
+**/__pycache__/
+/spark/.sparkStaging/
+/PSet2.pdf
+/data/
+dbt/.user.yml
+dbt/dbt_packages/
+dbt/logs/
+dbt/target/

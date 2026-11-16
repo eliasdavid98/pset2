@@ -1,0 +1,24 @@
+name: pset2_churn
+version: "1.0.0"
+config-version: 2
+
+profile: pset2_churn
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  pset2_churn:
+    bronze:
+      +schema: BRONZE
+      +materialized: table
+    silver:
+      +schema: SILVER
+      +materialized: table
+    gold:
+      +schema: GOLD
+      +materialized: table
